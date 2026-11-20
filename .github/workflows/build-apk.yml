@@ -1,0 +1,42 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Bubblewrap CLI
+        run: npm install -g @bubblewrap/cli
+
+      - name: Initialize TWA project
+        run: |
+          mkdir -p android-app
+          cd android-app
+          bubblewrap init --manifest=https://hinn9582-ship-it.github.io/my-gmail-app/manifest.json --yes
+
+      - name: Build APK
+        run: |
+          cd android-app
+          bubblewrap build
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: my-gmail-app-apk
+          path: android-app/app-release-signed.apk
