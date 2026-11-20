@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini Gmail</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#f6f8fc] text-gray-800 h-screen flex flex-col overflow-hidden">
+
+  <!-- Top Bar -->
+  <header class="h-16 px-4 flex items-center justify-between bg-[#f6f8fc] border-b border-gray-200">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center font-bold">M</div>
+      <span class="text-xl font-medium text-gray-700">MailClone</span>
+    </div>
+    <input
+      id="searchInput"
+      type="text"
+      placeholder="Search mail..."
+      class="w-full max-w-xl bg-[#eaf1fb] rounded-full px-5 py-2.5 text-sm outline-none focus:bg-white focus:shadow transition"
+    />
+    <div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-semibold">U</div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-60 p-3 flex flex-col gap-2 bg-[#f6f8fc]">
+      <button
+        id="composeBtn"
+        class="flex items-center gap-3 bg-[#c2e7ff] hover:bg-[#b3dcfa] text-[#001d35] font-medium px-5 py-4 rounded-2xl shadow-sm transition w-fit mb-2"
+      >
+        <span>✏️</span>
+        <span>Compose</span>
+      </button>
+
+      <button data-folder="inbox" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium bg-[#d3e3fd] text-[#041e49]">
+        <span>📥 Inbox</span>
+        <span id="inboxCount" class="text-xs font-bold"></span>
+      </button>
+      <button data-folder="sent" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium hover:bg-gray-200/70">
+        <span>📤 Sent</span>
+      </button>
+      <button data-folder="trash" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium hover:bg-gray-200/70">
+        <span>🗑️ Trash</span>
+      </button>
+    </aside>
+
+    <!-- Email List & Reader -->
+    <main class="flex-1 bg-white rounded-tl-2xl shadow-sm flex overflow-hidden mr-3 mb-3">
+      <!-- Email List -->
+      <section class="w-full md:w-2/5 border-r border-gray-200 overflow-y-auto" id="emailList"></section>
+
+      <!-- Reading Pane -->
+      <section class="hidden md:flex flex-1 flex-col p-6 overflow-y-auto bg-white" id="readerPane">
+        <div class="text-gray-400 text-sm m-auto">Select an email to read</div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Compose Modal -->
+  <div id="composeModal" class="hidden fixed bottom-0 right-6 w-full max-w-md bg-white rounded-t-xl shadow-2xl border border-gray-200 z-50">
+    <div class="flex items-center justify-between bg-[#f2f6fc] px-4 py-3 rounded-t-xl">
+      <span class="font-medium text-sm">New Message</span>
+      <button id="closeCompose" class="text-gray-600 hover:text-black font-bold">✕</button>
+    </div>
+    <form id="composeForm" class="p-4 flex flex-col gap-3">
+      <input id="toInput" type="email" required placeholder="To (e.g. ali@example.com)" class="border-b pb-2 text-sm outline-none" />
+      <input id="subjectInput" type="text" required placeholder="Subject" class="border-b pb-2 text-sm outline-none" />
+      <textarea id="bodyInput" rows="6" required placeholder="Write your message..." class="text-sm outline-none resize-none"></textarea>
+      <div class="flex justify-between items-center pt-2">
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-full text-sm font-medium">
+          Send
+        </button>
+        <button type="button" id="deleteDraft" class="text-gray-500 hover:text-red-600 text-sm">Discard</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    let emails = JSON.parse(localStorage.getItem('mini_gmail_emails')) || [
+      {
+        id: 1,
+        from: 'team@mailclone.dev',
+        to: 'me@mailclone.dev',
+        subject: 'Welcome to your custom Gmail app!',
+        body: 'Assalam-o-Alaikum!\n\nAapne abhi apni pehli Gmail jaisi mail app ka UI aur logic banana shuru kiya hai.\n\nCompose button dabakar naya email bheinjein, search bar use karein, ya kisi bhi email ko delete karein.',
+        time: '10:30 AM',
+        folder: 'inbox',
+        unread: true
+      },
+      {
+        id: 2,
+        from: 'github@noreply.com',
+        to: 'me@mailclone.dev',
+        subject: 'Your repository setup checklist',
+        body: 'Tip: Jab aapka frontend ready ho jaye, toh aap isko Node.js + Nodemailer ke saath connect karke real emails bhi bhej sakte hain.',
+        time: 'Yesterday',
+        folder: 'inbox',
+        unread: false
+      }
+    ];
+
+    let currentFolder = 'inbox';
+    let selectedEmailId = null;
+
+    const saveEmails = () => localStorage.setItem('mini_gmail_emails', JSON.stringify(emails));
+
+    function renderFolderStyles() {
+      document.querySelectorAll('.folder-btn').forEach(btn => {
+        const isActive = btn.dataset.folder === currentFolder;
+        btn.className = `folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium transition ${
+          isActive ? 'bg-[#d3e3fd] text-[#041e49]' : 'hover:bg-gray-200/70 text-gray-700'
+        }`;
+      });
+      const unreadCount = emails.filter(e => e.folder === 'inbox' && e.unread).length;
+      document.getElementById('inboxCount').textContent = unreadCount > 0 ? unreadCount : '';
+    }
+
+    function renderEmailList() {
+      const query = document.getElementById('searchInput').value.toLowerCase().trim();
+      const filtered = emails.filter(e => {
+        const matchesFolder = e.folder === currentFolder;
+        const matchesQuery =
+          !query ||
+          e.subject.toLowerCase().includes(query) ||
+          e.from.toLowerCase().includes(query) ||
+          e.to.toLowerCase().includes(query) ||
+          e.body.toLowerCase().includes(query);
+        return matchesFolder && matchesQuery;
+      });
+
+      const listEl = document.getElementById('emailList');
+      if (filtered.length === 0) {
+        listEl.innerHTML = `<div class="p-8 text-center text-gray-400 text-sm">No messages in ${currentFolder}</div>`;
+        return;
+      }
+
+      listEl.innerHTML = filtered.map(email => `
+        <div onclick="openEmail(${email.id})" class="cursor-pointer px-4 py-3 border-b border-gray-100 hover:shadow-sm transition flex items-start justify-between gap-2 ${
+          selectedEmailId === email.id ? 'bg-[#eaf1fb]' : email.unread ? 'bg-white font-semibold' : 'bg-[#f8fafd] text-gray-600'
+        }">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate text-sm">${currentFolder === 'sent' ? 'To: ' + email.to : email.from}</span>
+              <span class="text-xs text-gray-500 shrink-0">${email.time}</span>
+            </div>
+            <div class="truncate text-sm mt-0.5">${email.subject}</div>
+            <div class="truncate text-xs text-gray-500 font-normal mt-0.5">${email.body}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openEmail(id) {
+      const email = emails.find(e => e.id === id);
+      if (!email) return;
+      email.unread = false;
+      selectedEmailId = id;
+      saveEmails();
+      renderFolderStyles();
+      renderEmailList();
+
+      const readerEl = document.getElementById('readerPane');
+      readerEl.innerHTML = `
+        <div class="flex items-start justify-between gap-4 border-b pb-4">
+          <div>
+            <h2 class="text-xl font-normal text-gray-900">${email.subject}</h2>
+            <div class="text-sm text-gray-600 mt-2">
+              <span class="font-medium">${email.from}</span> → <span>${email.to}</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-500">${email.time}</span>
+            ${email.folder !== 'trash'
+              ? `<button onclick="moveToTrash(${email.id})" class="px-3 py-1.5 text-xs bg-red-50 text-red-600 hover:bg-red-100 rounded-lg font-medium">Delete</button>`
+              : `<button onclick="restoreEmail(${email.id})" class="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg font-medium">Restore</button>`
+            }
+          </div>
+        </div>
+        <div class="mt-6 text-sm text-gray-800 whitespace-pre-line leading-relaxed">${email.body}</div>
+      `;
+    }
+
+    function moveToTrash(id) {
+      const email = emails.find(e => e.id === id);
+      if (email) {
+        email.folder = 'trash';
+        selectedEmailId = null;
+        saveEmails();
+        renderFolderStyles();
+        renderEmailList();
+        document.getElementById('readerPane').innerHTML = `<div class="text-gray-400 text-sm m-auto">Moved to Trash</div>`;
+      }
+    }
+
+    function restoreEmail(id) {
+      const email = emails.find(e => e.id === id);
+      if (email) {
+        email.folder = 'inbox';
+        saveEmails();
+        renderFolderStyles();
+        renderEmailList();
+        openEmail(id);
+      }
+    }
+
+    document.querySelectorAll('.folder-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentFolder = btn.dataset.folder;
+        selectedEmailId = null;
+        renderFolderStyles();
+        renderEmailList();
+        document.getElementById('readerPane').innerHTML = `<div class="text-gray-400 text-sm m-auto">Select an email to read</div>`;
+      });
+    });
+
+    document.getElementById('searchInput').addEventListener('input', renderEmailList);
+
+    const modal = document.getElementById('composeModal');
+    document.getElementById('composeBtn').addEventListener('click', () => modal.classList.remove('hidden'));
+    document.getElementById('closeCompose').addEventListener('click', () => modal.classList.add('hidden'));
+    document.getElementById('deleteDraft').addEventListener('click', () => {
+      document.getElementById('composeForm').reset();
+      modal.classList.add('hidden');
+    });
+
+    document.getElementById('composeForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const newEmail = {
+        id: Date.now(),
+        from: 'me@mailclone.dev',
+        to: document.getElementById('toInput').value.trim(),
+        subject: document.getElementById('subjectInput').value.trim(),
+        body: document.getElementById('bodyInput').value.trim(),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        folder: 'sent',
+        unread: false
+      };
+      emails.unshift(newEmail);
+      saveEmails();
+      document.getElementById('composeForm').reset();
+      modal.classList.add('hidden');
+      currentFolder = 'sent';
+      renderFolderStyles();
+      renderEmailList();
+      openEmail(newEmail.id);
+    });
+
+    renderFolderStyles();
+    renderEmailList();
+  </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini Gmail</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#f6f8fc] text-gray-800 h-screen flex flex-col overflow-hidden">
+
+  <!-- Top Bar -->
+  <header class="h-16 px-4 flex items-center justify-between bg-[#f6f8fc] border-b border-gray-200">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center font-bold">M</div>
+      <span class="text-xl font-medium text-gray-700">MailClone</span>
+    </div>
+    <input
+      id="searchInput"
+      type="text"
+      placeholder="Search mail..."
+      class="w-full max-w-xl bg-[#eaf1fb] rounded-full px-5 py-2.5 text-sm outline-none focus:bg-white focus:shadow transition"
+    />
+    <div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-semibold">U</div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-60 p-3 flex flex-col gap-2 bg-[#f6f8fc]">
+      <button
+        id="composeBtn"
+        class="flex items-center gap-3 bg-[#c2e7ff] hover:bg-[#b3dcfa] text-[#001d35] font-medium px-5 py-4 rounded-2xl shadow-sm transition w-fit mb-2"
+      >
+        <span>✏️</span>
+        <span>Compose</span>
+      </button>
+
+      <button data-folder="inbox" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium bg-[#d3e3fd] text-[#041e49]">
+        <span>📥 Inbox</span>
+        <span id="inboxCount" class="text-xs font-bold"></span>
+      </button>
+      <button data-folder="sent" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium hover:bg-gray-200/70">
+        <span>📤 Sent</span>
+      </button>
+      <button data-folder="trash" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium hover:bg-gray-200/70">
+        <span>🗑️ Trash</span>
+      </button>
+    </aside>
+
+    <!-- Email List & Reader -->
+    <main class="flex-1 bg-white rounded-tl-2xl shadow-sm flex overflow-hidden mr-3 mb-3">
+      <!-- Email List -->
+      <section class="w-full md:w-2/5 border-r border-gray-200 overflow-y-auto" id="emailList"></section>
+
+      <!-- Reading Pane -->
+      <section class="hidden md:flex flex-1 flex-col p-6 overflow-y-auto bg-white" id="readerPane">
+        <div class="text-gray-400 text-sm m-auto">Select an email to read</div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Compose Modal -->
+  <div id="composeModal" class="hidden fixed bottom-0 right-6 w-full max-w-md bg-white rounded-t-xl shadow-2xl border border-gray-200 z-50">
+    <div class="flex items-center justify-between bg-[#f2f6fc] px-4 py-3 rounded-t-xl">
+      <span class="font-medium text-sm">New Message</span>
+      <button id="closeCompose" class="text-gray-600 hover:text-black font-bold">✕</button>
+    </div>
+    <form id="composeForm" class="p-4 flex flex-col gap-3">
+      <input id="toInput" type="email" required placeholder="To (e.g. ali@example.com)" class="border-b pb-2 text-sm outline-none" />
+      <input id="subjectInput" type="text" required placeholder="Subject" class="border-b pb-2 text-sm outline-none" />
+      <textarea id="bodyInput" rows="6" required placeholder="Write your message..." class="text-sm outline-none resize-none"></textarea>
+      <div class="flex justify-between items-center pt-2">
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-full text-sm font-medium">
+          Send
+        </button>
+        <button type="button" id="deleteDraft" class="text-gray-500 hover:text-red-600 text-sm">Discard</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    let emails = JSON.parse(localStorage.getItem('mini_gmail_emails')) || [
+      {
+        id: 1,
+        from: 'team@mailclone.dev',
+        to: 'me@mailclone.dev',
+        subject: 'Welcome to your custom Gmail app!',
+        body: 'Assalam-o-Alaikum!\n\nAapne abhi apni pehli Gmail jaisi mail app ka UI aur logic banana shuru kiya hai.\n\nCompose button dabakar naya email bheinjein, search bar use karein, ya kisi bhi email ko delete karein.',
+        time: '10:30 AM',
+        folder: 'inbox',
+        unread: true
+      },
+      {
+        id: 2,
+        from: 'github@noreply.com',
+        to: 'me@mailclone.dev',
+        subject: 'Your repository setup checklist',
+        body: 'Tip: Jab aapka frontend ready ho jaye, toh aap isko Node.js + Nodemailer ke saath connect karke real emails bhi bhej sakte hain.',
+        time: 'Yesterday',
+        folder: 'inbox',
+        unread: false
+      }
+    ];
+
+    let currentFolder = 'inbox';
+    let selectedEmailId = null;
+
+    const saveEmails = () => localStorage.setItem('mini_gmail_emails', JSON.stringify(emails));
+
+    function renderFolderStyles() {
+      document.querySelectorAll('.folder-btn').forEach(btn => {
+        const isActive = btn.dataset.folder === currentFolder;
+        btn.className = `folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium transition ${
+          isActive ? 'bg-[#d3e3fd] text-[#041e49]' : 'hover:bg-gray-200/70 text-gray-700'
+        }`;
+      });
+      const unreadCount = emails.filter(e => e.folder === 'inbox' && e.unread).length;
+      document.getElementById('inboxCount').textContent = unreadCount > 0 ? unreadCount : '';
+    }
+
+    function renderEmailList() {
+      const query = document.getElementById('searchInput').value.toLowerCase().trim();
+      const filtered = emails.filter(e => {
+        const matchesFolder = e.folder === currentFolder;
+        const matchesQuery =
+          !query ||
+          e.subject.toLowerCase().includes(query) ||
+          e.from.toLowerCase().includes(query) ||
+          e.to.toLowerCase().includes(query) ||
+          e.body.toLowerCase().includes(query);
+        return matchesFolder && matchesQuery;
+      });
+
+      const listEl = document.getElementById('emailList');
+      if (filtered.length === 0) {
+        listEl.innerHTML = `<div class="p-8 text-center text-gray-400 text-sm">No messages in ${currentFolder}</div>`;
+        return;
+      }
+
+      listEl.innerHTML = filtered.map(email => `
+        <div onclick="openEmail(${email.id})" class="cursor-pointer px-4 py-3 border-b border-gray-100 hover:shadow-sm transition flex items-start justify-between gap-2 ${
+          selectedEmailId === email.id ? 'bg-[#eaf1fb]' : email.unread ? 'bg-white font-semibold' : 'bg-[#f8fafd] text-gray-600'
+        }">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate text-sm">${currentFolder === 'sent' ? 'To: ' + email.to : email.from}</span>
+              <span class="text-xs text-gray-500 shrink-0">${email.time}</span>
+            </div>
+            <div class="truncate text-sm mt-0.5">${email.subject}</div>
+            <div class="truncate text-xs text-gray-500 font-normal mt-0.5">${email.body}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openEmail(id) {
+      const email = emails.find(e => e.id === id);
+      if (!email) return;
+      email.unread = false;
+      selectedEmailId = id;
+      saveEmails();
+      renderFolderStyles();
+      renderEmailList();
+
+      const readerEl = document.getElementById('readerPane');
+      readerEl.innerHTML = `
+        <div class="flex items-start justify-between gap-4 border-b pb-4">
+          <div>
+            <h2 class="text-xl font-normal text-gray-900">${email.subject}</h2>
+            <div class="text-sm text-gray-600 mt-2">
+              <span class="font-medium">${email.from}</span> → <span>${email.to}</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-500">${email.time}</span>
+            ${email.folder !== 'trash'
+              ? `<button onclick="moveToTrash(${email.id})" class="px-3 py-1.5 text-xs bg-red-50 text-red-600 hover:bg-red-100 rounded-lg font-medium">Delete</button>`
+              : `<button onclick="restoreEmail(${email.id})" class="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg font-medium">Restore</button>`
+            }
+          </div>
+        </div>
+        <div class="mt-6 text-sm text-gray-800 whitespace-pre-line leading-relaxed">${email.body}</div>
+      `;
+    }
+
+    function moveToTrash(id) {
+      const email = emails.find(e => e.id === id);
+      if (email) {
+        email.folder = 'trash';
+        selectedEmailId = null;
+        saveEmails();
+        renderFolderStyles();
+        renderEmailList();
+        document.getElementById('readerPane').innerHTML = `<div class="text-gray-400 text-sm m-auto">Moved to Trash</div>`;
+      }
+    }
+
+    function restoreEmail(id) {
+      const email = emails.find(e => e.id === id);
+      if (email) {
+        email.folder = 'inbox';
+        saveEmails();
+        renderFolderStyles();
+        renderEmailList();
+        openEmail(id);
+      }
+    }
+
+    document.querySelectorAll('.folder-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentFolder = btn.dataset.folder;
+        selectedEmailId = null;
+        renderFolderStyles();
+        renderEmailList();
+        document.getElementById('readerPane').innerHTML = `<div class="text-gray-400 text-sm m-auto">Select an email to read</div>`;
+      });
+    });
+
+    document.getElementById('searchInput').addEventListener('input', renderEmailList);
+
+    const modal = document.getElementById('composeModal');
+    document.getElementById('composeBtn').addEventListener('click', () => modal.classList.remove('hidden'));
+    document.getElementById('closeCompose').addEventListener('click', () => modal.classList.add('hidden'));
+    document.getElementById('deleteDraft').addEventListener('click', () => {
+      document.getElementById('composeForm').reset();
+      modal.classList.add('hidden');
+    });
+
+    document.getElementById('composeForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const newEmail = {
+        id: Date.now(),
+        from: 'me@mailclone.dev',
+        to: document.getElementById('toInput').value.trim(),
+        subject: document.getElementById('subjectInput').value.trim(),
+        body: document.getElementById('bodyInput').value.trim(),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        folder: 'sent',
+        unread: false
+      };
+      emails.unshift(newEmail);
+      saveEmails();
+      document.getElementById('composeForm').reset();
+      modal.classList.add('hidden');
+      currentFolder = 'sent';
+      renderFolderStyles();
+      renderEmailList();
+      openEmail(newEmail.id);
+    });
+
+    renderFolderStyles();
+    renderEmailList();
+  </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini Gmail</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#f6f8fc] text-gray-800 h-screen flex flex-col overflow-hidden">
+
+  <!-- Top Bar -->
+  <header class="h-16 px-4 flex items-center justify-between bg-[#f6f8fc] border-b border-gray-200">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center font-bold">M</div>
+      <span class="text-xl font-medium text-gray-700">MailClone</span>
+    </div>
+    <input
+      id="searchInput"
+      type="text"
+      placeholder="Search mail..."
+      class="w-full max-w-xl bg-[#eaf1fb] rounded-full px-5 py-2.5 text-sm outline-none focus:bg-white focus:shadow transition"
+    />
+    <div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-semibold">U</div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-60 p-3 flex flex-col gap-2 bg-[#f6f8fc]">
+      <button
+        id="composeBtn"
+        class="flex items-center gap-3 bg-[#c2e7ff] hover:bg-[#b3dcfa] text-[#001d35] font-medium px-5 py-4 rounded-2xl shadow-sm transition w-fit mb-2"
+      >
+        <span>✏️</span>
+        <span>Compose</span>
+      </button>
+
+      <button data-folder="inbox" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium bg-[#d3e3fd] text-[#041e49]">
+        <span>📥 Inbox</span>
+        <span id="inboxCount" class="text-xs font-bold"></span>
+      </button>
+      <button data-folder="sent" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium hover:bg-gray-200/70">
+        <span>📤 Sent</span>
+      </button>
+      <button data-folder="trash" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium hover:bg-gray-200/70">
+        <span>🗑️ Trash</span>
+      </button>
+    </aside>
+
+    <!-- Email List & Reader -->
+    <main class="flex-1 bg-white rounded-tl-2xl shadow-sm flex overflow-hidden mr-3 mb-3">
+      <!-- Email List -->
+      <section class="w-full md:w-2/5 border-r border-gray-200 overflow-y-auto" id="emailList"></section>
+
+      <!-- Reading Pane -->
+      <section class="hidden md:flex flex-1 flex-col p-6 overflow-y-auto bg-white" id="readerPane">
+        <div class="text-gray-400 text-sm m-auto">Select an email to read</div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Compose Modal -->
+  <div id="composeModal" class="hidden fixed bottom-0 right-6 w-full max-w-md bg-white rounded-t-xl shadow-2xl border border-gray-200 z-50">
+    <div class="flex items-center justify-between bg-[#f2f6fc] px-4 py-3 rounded-t-xl">
+      <span class="font-medium text-sm">New Message</span>
+      <button id="closeCompose" class="text-gray-600 hover:text-black font-bold">✕</button>
+    </div>
+    <form id="composeForm" class="p-4 flex flex-col gap-3">
+      <input id="toInput" type="email" required placeholder="To (e.g. ali@example.com)" class="border-b pb-2 text-sm outline-none" />
+      <input id="subjectInput" type="text" required placeholder="Subject" class="border-b pb-2 text-sm outline-none" />
+      <textarea id="bodyInput" rows="6" required placeholder="Write your message..." class="text-sm outline-none resize-none"></textarea>
+      <div class="flex justify-between items-center pt-2">
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-full text-sm font-medium">
+          Send
+        </button>
+        <button type="button" id="deleteDraft" class="text-gray-500 hover:text-red-600 text-sm">Discard</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    let emails = JSON.parse(localStorage.getItem('mini_gmail_emails')) || [
+      {
+        id: 1,
+        from: 'team@mailclone.dev',
+        to: 'me@mailclone.dev',
+        subject: 'Welcome to your custom Gmail app!',
+        body: 'Assalam-o-Alaikum!\n\nAapne abhi apni pehli Gmail jaisi mail app ka UI aur logic banana shuru kiya hai.\n\nCompose button dabakar naya email bheinjein, search bar use karein, ya kisi bhi email ko delete karein.',
+        time: '10:30 AM',
+        folder: 'inbox',
+        unread: true
+      },
+      {
+        id: 2,
+        from: 'github@noreply.com',
+        to: 'me@mailclone.dev',
+        subject: 'Your repository setup checklist',
+        body: 'Tip: Jab aapka frontend ready ho jaye, toh aap isko Node.js + Nodemailer ke saath connect karke real emails bhi bhej sakte hain.',
+        time: 'Yesterday',
+        folder: 'inbox',
+        unread: false
+      }
+    ];
+
+    let currentFolder = 'inbox';
+    let selectedEmailId = null;
+
+    const saveEmails = () => localStorage.setItem('mini_gmail_emails', JSON.stringify(emails));
+
+    function renderFolderStyles() {
+      document.querySelectorAll('.folder-btn').forEach(btn => {
+        const isActive = btn.dataset.folder === currentFolder;
+        btn.className = `folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium transition ${
+          isActive ? 'bg-[#d3e3fd] text-[#041e49]' : 'hover:bg-gray-200/70 text-gray-700'
+        }`;
+      });
+      const unreadCount = emails.filter(e => e.folder === 'inbox' && e.unread).length;
+      document.getElementById('inboxCount').textContent = unreadCount > 0 ? unreadCount : '';
+    }
+
+    function renderEmailList() {
+      const query = document.getElementById('searchInput').value.toLowerCase().trim();
+      const filtered = emails.filter(e => {
+        const matchesFolder = e.folder === currentFolder;
+        const matchesQuery =
+          !query ||
+          e.subject.toLowerCase().includes(query) ||
+          e.from.toLowerCase().includes(query) ||
+          e.to.toLowerCase().includes(query) ||
+          e.body.toLowerCase().includes(query);
+        return matchesFolder && matchesQuery;
+      });
+
+      const listEl = document.getElementById('emailList');
+      if (filtered.length === 0) {
+        listEl.innerHTML = `<div class="p-8 text-center text-gray-400 text-sm">No messages in ${currentFolder}</div>`;
+        return;
+      }
+
+      listEl.innerHTML = filtered.map(email => `
+        <div onclick="openEmail(${email.id})" class="cursor-pointer px-4 py-3 border-b border-gray-100 hover:shadow-sm transition flex items-start justify-between gap-2 ${
+          selectedEmailId === email.id ? 'bg-[#eaf1fb]' : email.unread ? 'bg-white font-semibold' : 'bg-[#f8fafd] text-gray-600'
+        }">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate text-sm">${currentFolder === 'sent' ? 'To: ' + email.to : email.from}</span>
+              <span class="text-xs text-gray-500 shrink-0">${email.time}</span>
+            </div>
+            <div class="truncate text-sm mt-0.5">${email.subject}</div>
+            <div class="truncate text-xs text-gray-500 font-normal mt-0.5">${email.body}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openEmail(id) {
+      const email = emails.find(e => e.id === id);
+      if (!email) return;
+      email.unread = false;
+      selectedEmailId = id;
+      saveEmails();
+      renderFolderStyles();
+      renderEmailList();
+
+      const readerEl = document.getElementById('readerPane');
+      readerEl.innerHTML = `
+        <div class="flex items-start justify-between gap-4 border-b pb-4">
+          <div>
+            <h2 class="text-xl font-normal text-gray-900">${email.subject}</h2>
+            <div class="text-sm text-gray-600 mt-2">
+              <span class="font-medium">${email.from}</span> → <span>${email.to}</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-500">${email.time}</span>
+            ${email.folder !== 'trash'
+              ? `<button onclick="moveToTrash(${email.id})" class="px-3 py-1.5 text-xs bg-red-50 text-red-600 hover:bg-red-100 rounded-lg font-medium">Delete</button>`
+              : `<button onclick="restoreEmail(${email.id})" class="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg font-medium">Restore</button>`
+            }
+          </div>
+        </div>
+        <div class="mt-6 text-sm text-gray-800 whitespace-pre-line leading-relaxed">${email.body}</div>
+      `;
+    }
+
+    function moveToTrash(id) {
+      const email = emails.find(e => e.id === id);
+      if (email) {
+        email.folder = 'trash';
+        selectedEmailId = null;
+        saveEmails();
+        renderFolderStyles();
+        renderEmailList();
+        document.getElementById('readerPane').innerHTML = `<div class="text-gray-400 text-sm m-auto">Moved to Trash</div>`;
+      }
+    }
+
+    function restoreEmail(id) {
+      const email = emails.find(e => e.id === id);
+      if (email) {
+        email.folder = 'inbox';
+        saveEmails();
+        renderFolderStyles();
+        renderEmailList();
+        openEmail(id);
+      }
+    }
+
+    document.querySelectorAll('.folder-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentFolder = btn.dataset.folder;
+        selectedEmailId = null;
+        renderFolderStyles();
+        renderEmailList();
+        document.getElementById('readerPane').innerHTML = `<div class="text-gray-400 text-sm m-auto">Select an email to read</div>`;
+      });
+    });
+
+    document.getElementById('searchInput').addEventListener('input', renderEmailList);
+
+    const modal = document.getElementById('composeModal');
+    document.getElementById('composeBtn').addEventListener('click', () => modal.classList.remove('hidden'));
+    document.getElementById('closeCompose').addEventListener('click', () => modal.classList.add('hidden'));
+    document.getElementById('deleteDraft').addEventListener('click', () => {
+      document.getElementById('composeForm').reset();
+      modal.classList.add('hidden');
+    });
+
+    document.getElementById('composeForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const newEmail = {
+        id: Date.now(),
+        from: 'me@mailclone.dev',
+        to: document.getElementById('toInput').value.trim(),
+        subject: document.getElementById('subjectInput').value.trim(),
+        body: document.getElementById('bodyInput').value.trim(),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        folder: 'sent',
+        unread: false
+      };
+      emails.unshift(newEmail);
+      saveEmails();
+      document.getElementById('composeForm').reset();
+      modal.classList.add('hidden');
+      currentFolder = 'sent';
+      renderFolderStyles();
+      renderEmailList();
+      openEmail(newEmail.id);
+    });
+
+    renderFolderStyles();
+    renderEmailList();
+  </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini Gmail</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#f6f8fc] text-gray-800 h-screen flex flex-col overflow-hidden">
+
+  <!-- Top Bar -->
+  <header class="h-16 px-4 flex items-center justify-between bg-[#f6f8fc] border-b border-gray-200">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center font-bold">M</div>
+      <span class="text-xl font-medium text-gray-700">MailClone</span>
+    </div>
+    <input
+      id="searchInput"
+      type="text"
+      placeholder="Search mail..."
+      class="w-full max-w-xl bg-[#eaf1fb] rounded-full px-5 py-2.5 text-sm outline-none focus:bg-white focus:shadow transition"
+    />
+    <div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-semibold">U</div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-60 p-3 flex flex-col gap-2 bg-[#f6f8fc]">
+      <button
+        id="composeBtn"
+        class="flex items-center gap-3 bg-[#c2e7ff] hover:bg-[#b3dcfa] text-[#001d35] font-medium px-5 py-4 rounded-2xl shadow-sm transition w-fit mb-2"
+      >
+        <span>✏️</span>
+        <span>Compose</span>
+      </button>
+
+      <button data-folder="inbox" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium bg-[#d3e3fd] text-[#041e49]">
+        <span>📥 Inbox</span>
+        <span id="inboxCount" class="text-xs font-bold"></span>
+      </button>
+      <button data-folder="sent" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium hover:bg-gray-200/70">
+        <span>📤 Sent</span>
+      </button>
+      <button data-folder="trash" class="folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium hover:bg-gray-200/70">
+        <span>🗑️ Trash</span>
+      </button>
+    </aside>
+
+    <!-- Email List & Reader -->
+    <main class="flex-1 bg-white rounded-tl-2xl shadow-sm flex overflow-hidden mr-3 mb-3">
+      <!-- Email List -->
+      <section class="w-full md:w-2/5 border-r border-gray-200 overflow-y-auto" id="emailList"></section>
+
+      <!-- Reading Pane -->
+      <section class="hidden md:flex flex-1 flex-col p-6 overflow-y-auto bg-white" id="readerPane">
+        <div class="text-gray-400 text-sm m-auto">Select an email to read</div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Compose Modal -->
+  <div id="composeModal" class="hidden fixed bottom-0 right-6 w-full max-w-md bg-white rounded-t-xl shadow-2xl border border-gray-200 z-50">
+    <div class="flex items-center justify-between bg-[#f2f6fc] px-4 py-3 rounded-t-xl">
+      <span class="font-medium text-sm">New Message</span>
+      <button id="closeCompose" class="text-gray-600 hover:text-black font-bold">✕</button>
+    </div>
+    <form id="composeForm" class="p-4 flex flex-col gap-3">
+      <input id="toInput" type="email" required placeholder="To (e.g. ali@example.com)" class="border-b pb-2 text-sm outline-none" />
+      <input id="subjectInput" type="text" required placeholder="Subject" class="border-b pb-2 text-sm outline-none" />
+      <textarea id="bodyInput" rows="6" required placeholder="Write your message..." class="text-sm outline-none resize-none"></textarea>
+      <div class="flex justify-between items-center pt-2">
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-full text-sm font-medium">
+          Send
+        </button>
+        <button type="button" id="deleteDraft" class="text-gray-500 hover:text-red-600 text-sm">Discard</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    let emails = JSON.parse(localStorage.getItem('mini_gmail_emails')) || [
+      {
+        id: 1,
+        from: 'team@mailclone.dev',
+        to: 'me@mailclone.dev',
+        subject: 'Welcome to your custom Gmail app!',
+        body: 'Assalam-o-Alaikum!\n\nAapne abhi apni pehli Gmail jaisi mail app ka UI aur logic banana shuru kiya hai.\n\nCompose button dabakar naya email bheinjein, search bar use karein, ya kisi bhi email ko delete karein.',
+        time: '10:30 AM',
+        folder: 'inbox',
+        unread: true
+      },
+      {
+        id: 2,
+        from: 'github@noreply.com',
+        to: 'me@mailclone.dev',
+        subject: 'Your repository setup checklist',
+        body: 'Tip: Jab aapka frontend ready ho jaye, toh aap isko Node.js + Nodemailer ke saath connect karke real emails bhi bhej sakte hain.',
+        time: 'Yesterday',
+        folder: 'inbox',
+        unread: false
+      }
+    ];
+
+    let currentFolder = 'inbox';
+    let selectedEmailId = null;
+
+    const saveEmails = () => localStorage.setItem('mini_gmail_emails', JSON.stringify(emails));
+
+    function renderFolderStyles() {
+      document.querySelectorAll('.folder-btn').forEach(btn => {
+        const isActive = btn.dataset.folder === currentFolder;
+        btn.className = `folder-btn flex items-center justify-between px-4 py-2 rounded-full text-sm font-medium transition ${
+          isActive ? 'bg-[#d3e3fd] text-[#041e49]' : 'hover:bg-gray-200/70 text-gray-700'
+        }`;
+      });
+      const unreadCount = emails.filter(e => e.folder === 'inbox' && e.unread).length;
+      document.getElementById('inboxCount').textContent = unreadCount > 0 ? unreadCount : '';
+    }
+
+    function renderEmailList() {
+      const query = document.getElementById('searchInput').value.toLowerCase().trim();
+      const filtered = emails.filter(e => {
+        const matchesFolder = e.folder === currentFolder;
+        const matchesQuery =
+          !query ||
+          e.subject.toLowerCase().includes(query) ||
+          e.from.toLowerCase().includes(query) ||
+          e.to.toLowerCase().includes(query) ||
+          e.body.toLowerCase().includes(query);
+        return matchesFolder && matchesQuery;
+      });
+
+      const listEl = document.getElementById('emailList');
+      if (filtered.length === 0) {
+        listEl.innerHTML = `<div class="p-8 text-center text-gray-400 text-sm">No messages in ${currentFolder}</div>`;
+        return;
+      }
+
+      listEl.innerHTML = filtered.map(email => `
+        <div onclick="openEmail(${email.id})" class="cursor-pointer px-4 py-3 border-b border-gray-100 hover:shadow-sm transition flex items-start justify-between gap-2 ${
+          selectedEmailId === email.id ? 'bg-[#eaf1fb]' : email.unread ? 'bg-white font-semibold' : 'bg-[#f8fafd] text-gray-600'
+        }">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate text-sm">${currentFolder === 'sent' ? 'To: ' + email.to : email.from}</span>
+              <span class="text-xs text-gray-500 shrink-0">${email.time}</span>
+            </div>
+            <div class="truncate text-sm mt-0.5">${email.subject}</div>
+            <div class="truncate text-xs text-gray-500 font-normal mt-0.5">${email.body}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openEmail(id) {
+      const email = emails.find(e => e.id === id);
+      if (!email) return;
+      email.unread = false;
+      selectedEmailId = id;
+      saveEmails();
+      renderFolderStyles();
+      renderEmailList();
+
+      const readerEl = document.getElementById('readerPane');
+      readerEl.innerHTML = `
+        <div class="flex items-start justify-between gap-4 border-b pb-4">
+          <div>
+            <h2 class="text-xl font-normal text-gray-900">${email.subject}</h2>
+            <div class="text-sm text-gray-600 mt-2">
+              <span class="font-medium">${email.from}</span> → <span>${email.to}</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-500">${email.time}</span>
+            ${email.folder !== 'trash'
+              ? `<button onclick="moveToTrash(${email.id})" class="px-3 py-1.5 text-xs bg-red-50 text-red-600 hover:bg-red-100 rounded-lg font-medium">Delete</button>`
+              : `<button onclick="restoreEmail(${email.id})" class="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg font-medium">Restore</button>`
+            }
+          </div>
+        </div>
+        <div class="mt-6 text-sm text-gray-800 whitespace-pre-line leading-relaxed">${email.body}</div>
+      `;
+    }
+
+    function moveToTrash(id) {
+      const email = emails.find(e => e.id === id);
+      if (email) {
+        email.folder = 'trash';
+        selectedEmailId = null;
+        saveEmails();
+        renderFolderStyles();
+        renderEmailList();
+        document.getElementById('readerPane').innerHTML = `<div class="text-gray-400 text-sm m-auto">Moved to Trash</div>`;
+      }
+    }
+
+    function restoreEmail(id) {
+      const email = emails.find(e => e.id === id);
+      if (email) {
+        email.folder = 'inbox';
+        saveEmails();
+        renderFolderStyles();
+        renderEmailList();
+        openEmail(id);
+      }
+    }
+
+    document.querySelectorAll('.folder-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentFolder = btn.dataset.folder;
+        selectedEmailId = null;
+        renderFolderStyles();
+        renderEmailList();
+        document.getElementById('readerPane').innerHTML = `<div class="text-gray-400 text-sm m-auto">Select an email to read</div>`;
+      });
+    });
+
+    document.getElementById('searchInput').addEventListener('input', renderEmailList);
+
+    const modal = document.getElementById('composeModal');
+    document.getElementById('composeBtn').addEventListener('click', () => modal.classList.remove('hidden'));
+    document.getElementById('closeCompose').addEventListener('click', () => modal.classList.add('hidden'));
+    document.getElementById('deleteDraft').addEventListener('click', () => {
+      document.getElementById('composeForm').reset();
+      modal.classList.add('hidden');
+    });
+
+    document.getElementById('composeForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const newEmail = {
+        id: Date.now(),
+        from: 'me@mailclone.dev',
+        to: document.getElementById('toInput').value.trim(),
+        subject: document.getElementById('subjectInput').value.trim(),
+        body: document.getElementById('bodyInput').value.trim(),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        folder: 'sent',
+        unread: false
+      };
+      emails.unshift(newEmail);
+      saveEmails();
+      document.getElementById('composeForm').reset();
+      modal.classList.add('hidden');
+      currentFolder = 'sent';
+      renderFolderStyles();
+      renderEmailList();
+      openEmail(newEmail.id);
+    });
+
+    renderFolderStyles();
+    renderEmailList();
+  </script>
+</body>
+</html>
